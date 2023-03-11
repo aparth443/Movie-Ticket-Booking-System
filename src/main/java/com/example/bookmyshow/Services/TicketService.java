@@ -1,6 +1,7 @@
 package com.example.bookmyshow.Services;
 
 import com.example.bookmyshow.Converters.TicketConverter;
+import com.example.bookmyshow.EntryDtos.CancelTicketDto;
 import com.example.bookmyshow.EntryDtos.TicketEntryDto;
 import com.example.bookmyshow.Models.ShowEntity;
 import com.example.bookmyshow.Models.ShowSeatEntity;
@@ -15,8 +16,7 @@ import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
 import javax.mail.internet.MimeMessage;
-import java.util.Date;
-import java.util.List;
+import java.util.*;
 
 @Service
 public class TicketService {
@@ -64,7 +64,7 @@ public class TicketService {
 
         String bookedSeats = "";
         for(String seats : selectedSeats){
-            bookedSeats += seats + ", ";
+            bookedSeats += seats + ",";
         }
         ticketEntity.setBookedSeats(bookedSeats);
 
@@ -94,7 +94,7 @@ public class TicketService {
         mimeMessageHelper.setFrom("agrawalparth475@gmail.com");
         mimeMessageHelper.setTo(userEntity.getEmail());
         mimeMessageHelper.setText(body);
-        mimeMessageHelper.seitSubject("Confirming your booked Ticket");
+        mimeMessageHelper.setSubject("Confirming your booked Ticket");
 
         javaMailSender.send(mimeMessage);
 
@@ -116,5 +116,70 @@ public class TicketService {
                 }
             }
             return true;
+    }
+
+    public String cancelTicket(CancelTicketDto cancelTicketDto) throws Exception{
+        TicketEntity ticketEntity = ticketRepository.findById(cancelTicketDto.getTicketId()).get();
+        String bookedTickets = ticketEntity.getBookedSeats();
+        String [] str = bookedTickets.split(",");
+        List<String> bookedSeats = Arrays.asList(str);
+        List<String> toBeCancelled = cancelTicketDto.getCancelTicketList();
+        for(String seat: toBeCancelled){
+            if(!bookedSeats.contains(seat)){
+                throw new Exception("Selected seat is not booked by you. Please select valid seat.");
+            }
+        }
+        List<ShowSeatEntity> showSeatEntityList = ticketEntity.getShowEntity().getShowSeatEntityList();
+        HashSet<String> deletedSeats = new HashSet<>();
+        int cancelledTicketPrice = 0;
+        for(ShowSeatEntity seat: showSeatEntityList){
+            if(toBeCancelled.contains(seat.getSeatNo())){
+                deletedSeats.add(seat.getSeatNo());
+                cancelledTicketPrice += seat.getPrice();
+                seat.setBooked(false);
+                seat.setBookedAt(null);
+            }
+        }
+
+        String newBookedSeats = "";
+        for(String ticket: bookedSeats){
+            if(!deletedSeats.contains(ticket)){
+                if(!newBookedSeats.isEmpty()){
+                    newBookedSeats += ",";
+                }
+                newBookedSeats += ticket;
+            }
+        }
+        String deleted = "";
+        for(String s: deletedSeats){
+            deleted += s;
+        }
+        int cancellationCharge = deletedSeats.size()*50;
+        int amountToBeRefunded = cancelledTicketPrice - cancellationCharge;
+        int newPrice = ticketEntity.getTotalAmount() - cancelledTicketPrice;
+        ticketEntity.setTotalAmount(newPrice);
+        UserEntity userEntity = ticketEntity.getUserEntity();
+
+        String body ="Hi " + userEntity.getName() + ",\n" + "This is to confirm that your booking for ticket " + ticketEntity.getTicketId() + "has been cancelled successfully.\n Cancelled Seats:" + deleted
+                 + "\n Cancellation Charges " + cancellationCharge + "\nAmount to be refunded: " + amountToBeRefunded  + "\nHave a great day!";
+
+        MimeMessage mimeMessage=javaMailSender.createMimeMessage();
+        MimeMessageHelper mimeMessageHelper=new MimeMessageHelper(mimeMessage,true);
+        mimeMessageHelper.setFrom("agrawalparth475@gmail.com");
+        mimeMessageHelper.setTo(userEntity.getEmail());
+        mimeMessageHelper.setText(body);
+        mimeMessageHelper.setSubject("Cancellation of Movie tickets ");
+
+        javaMailSender.send(mimeMessage);
+
+
+        if(newBookedSeats.isEmpty()){
+            ticketRepository.delete(ticketEntity);
+            userRepository.save(userEntity);
+            return "Ticket has been cancelled Successfully.";
+        }
+        ticketEntity.setBookedSeats(newBookedSeats);
+        userRepository.save(userEntity);
+        return "Ticket has been cancelled successfully.";
     }
 }
